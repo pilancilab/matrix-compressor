@@ -23,15 +23,18 @@ from lplr.quantizers import quantize
 from time import perf_counter_ns
 from sys import argv
 
+
 def main(precision: str = "half"):
     device = (
         torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
     )
-    model_location = repo_basepath / "artifacts/hlb/checkpoints/trained-speedyresnet.pt"
-    model = torch.load(model_location, map_location=device)
-    data = torch.load(hyp["misc"]["data_location"], map_location=device)["eval"][
-        "images"
-    ].to(memory_format=torch.channels_last)
+    model_location: pathlib.Path = (
+        repo_basepath / "artifacts/hlb/checkpoints/trained-speedyresnet.pt"
+    )
+    model: nn.Module = torch.load(model_location, map_location=device)
+    data: torch.Tensor = torch.load(hyp["misc"]["data_location"], map_location=device)[
+        "eval"
+    ]["images"].to(memory_format=torch.channels_last)
 
     logger.info(data.shape)
 
@@ -49,7 +52,6 @@ def main(precision: str = "half"):
             logger.error(f"{precision} not supported")
             raise ValueError(f"{precision} not supported")
 
-
     batch_size = 1500
     logger.info(f"Using batchsize = {batch_size} for evaluation")
     indexed_data = data[:batch_size, ...]
@@ -62,13 +64,14 @@ def main(precision: str = "half"):
     )
     torch.cuda.synchronize()  ## clean up any pre-net setup operations
     starter.record()
-    y = model(indexed_data)
+    _ = model(indexed_data)
     ender.record()
     torch.cuda.synchronize()
 
     total_time_seconds = 1e-3 * starter.elapsed_time(ender)
 
     logger.info(f"{total_time_seconds} s elapsed")
+
 
 if __name__ == "__main__":
     main(argv[1])
