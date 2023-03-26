@@ -1,3 +1,6 @@
+import torch
+
+from . import repo_basepath
 
 # This is for testing that certain changes don't exceed some X% portion of the reference GPU (here an A100)
 # so we can help reduce a possibility that future releases don't take away the accessibility of this codebase.
@@ -41,7 +44,7 @@ hyp = {
             "every_n_steps": 5,
         },
         "train_epochs": 12.6,
-        "device": "cuda",
-        "data_location": "artifacts/hlb/data.pt",
+        "device": "cuda" if torch.cuda.is_available() else "cpu",
+        "data_location": repo_basepath / "artifacts/hlb/data.pt",
     },
 }

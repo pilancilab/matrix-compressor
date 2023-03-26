@@ -1,4 +1,5 @@
 import torch
+from .config import hyp
 
 
 def batch_normalize_images(input_images, mean, std):
@@ -52,7 +53,7 @@ def make_random_square_masks(inputs, mask_size):
 
 def batch_cutmix(inputs, targets, patch_size):
     with torch.no_grad():
-        batch_permuted = torch.randperm(inputs.shape[0], device="cuda")
+        batch_permuted = torch.randperm(inputs.shape[0], device=inputs.device)
         cutmix_batch_mask = make_random_square_masks(inputs, patch_size)
         if cutmix_batch_mask is None:
             return (
@@ -93,7 +94,9 @@ def batch_flip_lr(batch_images, flip_chance=0.5):
 @torch.no_grad()
 def get_batches(data_dict, key, batchsize, epoch_fraction=1.0, cutmix_size=None):
     num_epoch_examples = len(data_dict[key]["images"])
-    shuffled = torch.randperm(num_epoch_examples, device="cuda")
+    shuffled = torch.randperm(
+        num_epoch_examples, device="cuda" if torch.cuda.is_available() else "cpu"
+    )
     if epoch_fraction < 1:
         shuffled = shuffled[
             : batchsize * round(epoch_fraction * shuffled.shape[0] / batchsize)
@@ -126,3 +129,30 @@ def get_batches(data_dict, key, batchsize, epoch_fraction=1.0, cutmix_size=None)
             ), targets.index_select(
                 0, shuffled[idx * batchsize : (idx + 1) * batchsize]
             )  ## Each item is only used/accessed by the network once per epoch. :D
+
+
+def init_split_parameter_dictionaries(network):
+    params_non_bias = {
+        "params": [],
+        "lr": hyp["opt"]["non_bias_lr"],
+        "momentum": 0.85,
+        "nesterov": True,
+        "weight_decay": hyp["opt"]["non_bias_decay"],
+        "foreach": True,
+    }
+    params_bias = {
+        "params": [],
+        "lr": hyp["opt"]["bias_lr"],
+        "momentum": 0.85,
+        "nesterov": True,
+        "weight_decay": hyp["opt"]["bias_decay"],
+        "foreach": True,
+    }
+
+    for name, p in network.named_parameters():
+        if p.requires_grad:
+            if "bias" in name:
+                params_bias["params"].append(p)
+            else:
+                params_non_bias["params"].append(p)
+    return params_non_bias, params_bias

@@ -8,30 +8,32 @@ try:
 except NameError:
   pass ## we're still good
 """
-import functools
-from functools import partial
+import copy
 import math
 import os
-import copy
 import pathlib
 from datetime import datetime
+from functools import partial
 
 import torch
 import torch.nn.functional as F
-from torch import nn
-
 import torchvision
+from torch import nn
 from torchvision import transforms
-from speedyresnet import (
-    SpeedyResNet,
+
+from .data.builder import create_dataset
+
+from .config import batchsize, bias_scaler, default_conv_kwargs, hyp
+from .nn.speedyresnet import (
     Conv,
     ConvGroup,
     FastGlobalMaxPooling,
     Linear,
+    SpeedyResNet,
     TemperatureScaler,
 )
-from .config import hyp, batchsize, bias_scaler, default_conv_kwargs
-from .utils import batch_normalize_images, get_batches
+from .utils import get_batches, init_split_parameter_dictionaries
+from .nn import NetworkEMA, make_net
 
 ## <-- teaching comments
 # <-- functional comments
@@ -45,331 +47,6 @@ from .utils import batch_normalize_images, get_batches
 # to production if you're going to use this code as such (such as breaking different section into unique files, etc). That said, if there's
 # ways this code could be improved and cleaned up, please do open a PR on the GitHub repo. Your support and help is much appreciated for this
 # project! :)
-
-
-#############################################
-#                Dataloader                 #
-#############################################
-
-if not os.path.exists(hyp["misc"]["data_location"]):
-    transform = transforms.Compose([transforms.ToTensor()])
-
-    cifar10 = torchvision.datasets.CIFAR10(
-        "artifacts/hlb/cifar10/", download=True, train=True, transform=transform
-    )
-    cifar10_eval = torchvision.datasets.CIFAR10(
-        "artifacts/hlb/cifar10/", download=False, train=False, transform=transform
-    )
-
-    # use the dataloader to get a single batch of all of the dataset items at once.
-    train_dataset_gpu_loader = torch.utils.data.DataLoader(
-        cifar10,
-        batch_size=len(cifar10),
-        drop_last=True,
-        shuffle=True,
-        num_workers=2,
-        persistent_workers=False,
-    )
-    eval_dataset_gpu_loader = torch.utils.data.DataLoader(
-        cifar10_eval,
-        batch_size=len(cifar10_eval),
-        drop_last=True,
-        shuffle=False,
-        num_workers=1,
-        persistent_workers=False,
-    )
-
-    train_dataset_gpu = {}
-    eval_dataset_gpu = {}
-
-    train_dataset_gpu["images"], train_dataset_gpu["targets"] = [
-        item.to(device=hyp["misc"]["device"], non_blocking=True)
-        for item in next(iter(train_dataset_gpu_loader))
-    ]
-    eval_dataset_gpu["images"], eval_dataset_gpu["targets"] = [
-        item.to(device=hyp["misc"]["device"], non_blocking=True)
-        for item in next(iter(eval_dataset_gpu_loader))
-    ]
-
-    cifar10_std, cifar10_mean = torch.std_mean(
-        train_dataset_gpu["images"], dim=(0, 2, 3)
-    )  # dynamically calculate the std and mean from the data. this shortens the code and should help us adapt to new datasets!
-
-
-
-    # preload with our mean and std
-    batch_normalize_images = partial(
-        batch_normalize_images, mean=cifar10_mean, std=cifar10_std
-    )
-
-    ## Batch normalize datasets, now. Wowie. We did it! We should take a break and make some tea now.
-    train_dataset_gpu["images"] = batch_normalize_images(train_dataset_gpu["images"])
-    eval_dataset_gpu["images"] = batch_normalize_images(eval_dataset_gpu["images"])
-
-    data = {"train": train_dataset_gpu, "eval": eval_dataset_gpu}
-
-    ## Convert dataset to FP16 now for the rest of the process....
-    data["train"]["images"] = data["train"]["images"].half().requires_grad_(False)
-    data["eval"]["images"] = data["eval"]["images"].half().requires_grad_(False)
-
-    # Convert this to one-hot to support the usage of cutmix (or whatever strange label tricks/magic you desire!)
-    data["train"]["targets"] = F.one_hot(data["train"]["targets"]).half()
-    data["eval"]["targets"] = F.one_hot(data["eval"]["targets"]).half()
-
-    torch.save(data, hyp["misc"]["data_location"])
-
-else:
-    ## This is effectively instantaneous, and takes us practically straight to where the dataloader-loaded dataset would be. :)
-    ## So as long as you run the above loading process once, and keep the file on the disc it's specified by default in the above
-    ## hyp dictionary, then we should be good. :)
-    data = torch.load(hyp["misc"]["data_location"])
-
-## As you'll note above and below, one difference is that we don't count loading the raw data to GPU since it's such a variable operation, and can sort of get in the way
-## of measuring other things. That said, measuring the preprocessing (outside of the padding) is still important to us.
-
-# Pad the GPU training dataset
-if hyp["net"]["pad_amount"] > 0:
-    ## Uncomfortable shorthand, but basically we pad evenly on all _4_ sides with the pad_amount specified in the original dictionary
-    data["train"]["images"] = F.pad(
-        data["train"]["images"], (hyp["net"]["pad_amount"],) * 4, "reflect"
-    )
-
-
-#############################################
-#          Init Helper Functions            #
-#############################################
-
-
-def get_patches(x, patch_shape=(3, 3), dtype=torch.float32):
-    # This uses the unfold operation (https://pytorch.org/docs/stable/generated/torch.nn.functional.unfold.html?highlight=unfold#torch.nn.functional.unfold)
-    # to extract a _view_ (i.e., there's no data copied here) of blocks in the input tensor. We have to do it twice -- once horizontally, once vertically. Then
-    # from that, we get our kernel_size*kernel_size patches to later calculate the statistics for the whitening tensor on :D
-    c, (h, w) = x.shape[1], patch_shape
-    return (
-        x.unfold(2, h, 1).unfold(3, w, 1).transpose(1, 3).reshape(-1, c, h, w).to(dtype)
-    )  # TODO: Annotate?
-
-
-def get_whitening_parameters(patches):
-    # As a high-level summary, we're basically finding the high-dimensional oval that best fits the data here.
-    # We can then later use this information to map the input information to a nicely distributed sphere, where also
-    # the most significant features of the inputs each have their own axis. This significantly cleans things up for the
-    # rest of the neural network and speeds up training.
-    n, c, h, w = patches.shape
-    est_covariance = torch.cov(patches.view(n, c * h * w).t())
-    eigenvalues, eigenvectors = torch.linalg.eigh(
-        est_covariance, UPLO="U"
-    )  # this is the same as saying we want our eigenvectors, with the specification that the matrix be an upper triangular matrix (instead of a lower-triangular matrix)
-    return eigenvalues.flip(0).view(-1, 1, 1, 1), eigenvectors.t().reshape(
-        c * h * w, c, h, w
-    ).flip(0)
-
-
-# Run this over the training set to calculate the patch statistics, then set the initial convolution as a non-learnable 'whitening' layer
-def init_whitening_conv(
-    layer,
-    train_set=None,
-    num_examples=None,
-    previous_block_data=None,
-    pad_amount=None,
-    freeze=True,
-    whiten_splits=None,
-):
-    if train_set is not None and previous_block_data is None:
-        if pad_amount > 0:
-            previous_block_data = train_set[
-                :num_examples, :, pad_amount:-pad_amount, pad_amount:-pad_amount
-            ]  # if it's none, we're at the beginning of our network.
-        else:
-            previous_block_data = train_set[:num_examples, :, :, :]
-
-    # chunking code to save memory for smaller-memory-size (generally consumer) GPUs
-    if whiten_splits is None:
-        previous_block_data_split = [
-            previous_block_data
-        ]  # If we're whitening in one go, then put it in a list for simplicity to reuse the logic below
-    else:
-        previous_block_data_split = previous_block_data.split(
-            whiten_splits, dim=0
-        )  # Otherwise, we split this into different chunks to keep things manageable
-
-    eigenvalue_list, eigenvector_list = [], []
-    for data_split in previous_block_data_split:
-        eigenvalues, eigenvectors = get_whitening_parameters(
-            get_patches(data_split, patch_shape=layer.weight.data.shape[2:])
-        )
-        eigenvalue_list.append(eigenvalues)
-        eigenvector_list.append(eigenvectors)
-
-    eigenvalues = torch.stack(eigenvalue_list, dim=0).mean(0)
-    eigenvectors = torch.stack(eigenvector_list, dim=0).mean(0)
-    # i believe the eigenvalues and eigenvectors come out in float32 for this because we implicitly cast it to float32 in the patches function (for numerical stability)
-    set_whitening_conv(
-        layer,
-        eigenvalues.to(dtype=layer.weight.dtype),
-        eigenvectors.to(dtype=layer.weight.dtype),
-        freeze=freeze,
-    )
-    data = layer(previous_block_data.to(dtype=layer.weight.dtype))
-    return data
-
-
-def set_whitening_conv(conv_layer, eigenvalues, eigenvectors, eps=1e-2, freeze=True):
-    shape = conv_layer.weight.data.shape
-    conv_layer.weight.data[-eigenvectors.shape[0] :, :, :, :] = (
-        eigenvectors / torch.sqrt(eigenvalues + eps)
-    )[
-        -shape[0] :, :, :, :
-    ]  # set the first n filters of the weight data to the top n significant (sorted by importance) filters from the eigenvectors
-    ## We don't want to train this, since this is implicitly whitening over the whole dataset
-    ## For more info, see David Page's original blogposts (link in the README.md as of this commit.)
-    if freeze:
-        conv_layer.weight.requires_grad = False
-
-
-#############################################
-#            Network Definition             #
-#############################################
-
-scaler = 2.0  ## You can play with this on your own if you want, for the first beta I wanted to keep things simple (for now) and leave it out of the hyperparams dict
-depths = {
-    "init": round(
-        scaler**-1 * hyp["net"]["base_depth"]
-    ),  # 32  w/ scaler at base value
-    "block1": round(
-        scaler**0 * hyp["net"]["base_depth"]
-    ),  # 64  w/ scaler at base value
-    "block2": round(
-        scaler**2 * hyp["net"]["base_depth"]
-    ),  # 256 w/ scaler at base value
-    "block3": round(
-        scaler**3 * hyp["net"]["base_depth"]
-    ),  # 512 w/ scaler at base value
-    "num_classes": 10,
-}
-
-
-def make_net():
-    # TODO: A way to make this cleaner??
-    # Note, you have to specify any arguments overlapping with defaults (i.e. everything but in/out depths) as kwargs so that they are properly overridden (TODO cleanup somehow?)
-    whiten_conv_depth = 3 * hyp["net"]["whitening"]["kernel_size"] ** 2
-    network_dict = nn.ModuleDict(
-        {
-            "initial_block": nn.ModuleDict(
-                {
-                    "whiten": Conv(
-                        3,
-                        whiten_conv_depth,
-                        kernel_size=hyp["net"]["whitening"]["kernel_size"],
-                        padding=0,
-                    ),
-                    "project": Conv(
-                        whiten_conv_depth, depths["init"], kernel_size=1, norm=2.2
-                    ),  # The norm argument means we renormalize the weights to be length 1 for this as the power for the norm, each step
-                    "activation": nn.GELU(),
-                }
-            ),
-            "residual1": ConvGroup(depths["init"], depths["block1"]),
-            "residual2": ConvGroup(depths["block1"], depths["block2"]),
-            "residual3": ConvGroup(depths["block2"], depths["block3"]),
-            "pooling": FastGlobalMaxPooling(),
-            "linear": Linear(
-                depths["block3"], depths["num_classes"], bias=False, norm=5.0
-            ),
-            "temperature": TemperatureScaler(hyp["opt"]["scaling_factor"]),
-        }
-    )
-
-    net = SpeedyResNet(network_dict)
-    net = net.to(hyp["misc"]["device"])
-    net = net.to(
-        memory_format=torch.channels_last
-    )  # to appropriately use tensor cores/avoid thrash while training
-    net.train()
-    net.half()  # Convert network to half before initializing the initial whitening layer.
-
-    ## Initialize the whitening convolution
-    with torch.no_grad():
-        # Initialize the first layer to be fixed weights that whiten the expected input values of the network be on the unit hypersphere. (i.e. their...average vector length is 1.?, IIRC)
-        init_whitening_conv(
-            net.net_dict["initial_block"]["whiten"],
-            data["train"]["images"].index_select(
-                0,
-                torch.randperm(
-                    data["train"]["images"].shape[0],
-                    device=data["train"]["images"].device,
-                ),
-            ),
-            num_examples=hyp["net"]["whitening"]["num_examples"],
-            pad_amount=hyp["net"]["pad_amount"],
-            whiten_splits=5000,
-        )  ## Hardcoded for now while we figure out the optimal whitening number
-        ## If you're running out of memory (OOM) feel free to decrease this, but
-        ## the index lookup in the dataloader may give you some trouble depending
-        ## upon exactly how memory-limited you are
-
-    return net
-
-
-
-########################################
-#          Training Helpers            #
-########################################
-
-
-class NetworkEMA(nn.Module):
-    def __init__(self, net):
-        super().__init__()  # init the parent module so this module is registered properly
-        self.net_ema = copy.deepcopy(net).eval().requires_grad_(False)  # copy the model
-
-    def update(self, current_net, decay):
-        with torch.no_grad():
-            for ema_net_parameter, (parameter_name, incoming_net_parameter) in zip(
-                self.net_ema.state_dict().values(), current_net.state_dict().items()
-            ):  # potential bug: assumes that the network architectures don't change during training (!!!!)
-                if incoming_net_parameter.dtype in (torch.half, torch.float):
-                    ema_net_parameter.mul_(decay).add_(
-                        incoming_net_parameter.detach().mul(1.0 - decay)
-                    )  # update the ema values in place, similar to how optimizer momentum is coded
-                    # And then we also copy the parameters back to the network, similarly to the Lookahead optimizer (but with a much more aggressive-at-the-end schedule)
-                    if (
-                        not ("norm" in parameter_name and "weight" in parameter_name)
-                        and not "whiten" in parameter_name
-                    ):
-                        incoming_net_parameter.copy_(ema_net_parameter.detach())
-
-    def forward(self, inputs):
-        with torch.no_grad():
-            return self.net_ema(inputs)
-
-
-
-
-def init_split_parameter_dictionaries(network):
-    params_non_bias = {
-        "params": [],
-        "lr": hyp["opt"]["non_bias_lr"],
-        "momentum": 0.85,
-        "nesterov": True,
-        "weight_decay": hyp["opt"]["non_bias_decay"],
-        "foreach": True,
-    }
-    params_bias = {
-        "params": [],
-        "lr": hyp["opt"]["bias_lr"],
-        "momentum": 0.85,
-        "nesterov": True,
-        "weight_decay": hyp["opt"]["bias_decay"],
-        "foreach": True,
-    }
-
-    for name, p in network.named_parameters():
-        if p.requires_grad:
-            if "bias" in name:
-                params_bias["params"].append(p)
-            else:
-                params_non_bias["params"].append(p)
-    return params_non_bias, params_bias
 
 
 ## Hey look, it's the soft-targets/label-smoothed loss! Native to PyTorch. Now, _that_ is pretty cool, and simplifies things a lot, to boot! :D :)
@@ -422,6 +99,7 @@ print_training_details(
 
 
 def main():
+    data = create_dataset()
     # Initializing constants for the whole run.
     net_ema = None  ## Reset any existing network emas, we want to have _something_ to check for existence so we can initialize the EMA right from where the network is during training
     ## (as opposed to initializing the network_ema from the randomly-initialized starter network, then forcing it to play catch-up all of a sudden in the last several epochs)

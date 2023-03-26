@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .config import default_conv_kwargs, hyp
+from ..config import default_conv_kwargs, hyp
 
 #############################################
 #            Network Components             #
