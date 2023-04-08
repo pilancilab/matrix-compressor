@@ -23,6 +23,7 @@ def lplr(
     :return: Low-precision Low-rank approximation
     """
 
+    logger.trace(f"Using seed = {SEED}")
     torch.random.manual_seed(SEED)
 
     # Sketch the column space of X with S matrix
