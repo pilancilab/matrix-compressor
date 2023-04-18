@@ -1,6 +1,6 @@
 from loguru import logger
 
-from llama_compression import load, setup_model_parallel
+from llama_compression import fb_load, setup_model_parallel
 
 
 def main():
@@ -10,7 +10,7 @@ def main():
     max_seq_len: int = 512
     max_batch_size: int = 32
 
-    generator = load(ckpt_dir, tokenizer_path, max_seq_len, max_batch_size)
+    generator = fb_load(ckpt_dir, tokenizer_path, max_seq_len, max_batch_size)
 
     for name, layer in generator.model.named_parameters():
         logger.debug(f"Layer: {name} has shape {layer.shape}")

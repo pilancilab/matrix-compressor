@@ -25,14 +25,20 @@ def setup_model_parallel(
     seed=42,
 ) -> Tuple[int, int]:
     if not local_rank:
+        logger.trace(f"Setting local rank internally to 0")
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
     os.environ["LOCAL_RANK"] = str(local_rank)
     os.environ["RANK"] = str(local_rank)
     if not world_size:
+        logger.trace(f"Setting world size internally to 1")
         world_size = int(os.environ.get("WORLD_SIZE", 1))
     os.environ["WORLD_SIZE"] = str(world_size)
-    os.environ["MASTER_ADDR"] = master_addr
-    os.environ["MASTER_PORT"] = master_port
+    if not os.environ.get("MASTER_ADDR"):
+        logger.trace(f"Setting master address to {master_addr}")
+        os.environ["MASTER_ADDR"] = master_addr
+    if not os.environ.get("MASTER_PORT"):
+        logger.trace(f"Setting master port manually to {master_port}")
+        os.environ["MASTER_PORT"] = master_port
 
     logger.info(f"local_rank={local_rank}, world_size={world_size}, rank={local_rank}")
 
@@ -44,7 +50,7 @@ def setup_model_parallel(
     return local_rank, world_size
 
 
-def load(
+def fb_load(
     ckpt_dir: str,
     tokenizer_path: str,
     max_seq_len: int,
@@ -67,6 +73,7 @@ def load(
         max_seq_len=max_seq_len, max_batch_size=max_batch_size, **params
     )
     tokenizer = Tokenizer(model_path=tokenizer_path)
+    logger.trace(tokenizer)
     model_args.vocab_size = tokenizer.n_words
     torch.set_default_tensor_type(torch.cuda.HalfTensor)
     model = Transformer(model_args)
@@ -75,4 +82,18 @@ def load(
 
     generator = LLaMA(model, tokenizer)
     logger.info(f"Loaded in {time.time() - start_time:.2f} seconds")
+    return generator
+
+
+def hf_load(path: str) -> LLaMA:
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+
+    logger.trace("Loading Tokenizer")
+    tokenizer = AutoTokenizer.from_pretrained(path)
+    logger.trace("Loaded Tokenizer")
+    
+    logger.trace("Loading CausalLM Model")
+    model = AutoModelForCausalLM.from_pretrained(path)
+    logger.trace("Loaded CausalLM model")
+    generator = LLaMA(model, tokenizer)
     return generator
