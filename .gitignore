@@ -160,5 +160,7 @@ cython_debug/
 #.idea/
 
 .vscode/
-artifacts/
+artifacts
 misc/
+**/lm_cache
+**/exp*.py
