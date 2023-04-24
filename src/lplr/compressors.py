@@ -25,24 +25,43 @@ def lplr(
 
     logger.trace(f"Using seed = {SEED}")
     torch.random.manual_seed(SEED)
-
+    orig_dtype = X.dtype
+    X = X.float()
     # Sketch the column space of X with S matrix
     S = torch.randn(X.shape[1], r, device=X.device, dtype=X.dtype) / math.sqrt(r)  # Gaussian sketching matrix
 
-    logger.debug(f"S.dtype = {S.dtype}, X.dtype={X.dtype}")
+    logger.trace(f"S.dtype = {S.dtype}, X.dtype={X.dtype}")
 
     # Quantize the sketched matrix and get the first low-rank factor
     logger.trace(f"X.dtype = {X.dtype}")
     Z = quantize(X=X @ S, B=B1)
     logger.trace(f"Z.dtype = {Z.dtype}")
+    
+    if torch.isnan(Z).any().item():
+        logger.error(f"NaNs encountered in right sketched matrix")
 
     # Get the second low-rank factor
-    W = torch.linalg.pinv(Z.float()).type(X.dtype) @ X
+    pinv = torch.linalg.pinv(Z.float()).type(X.dtype)
+    if torch.isnan(pinv).any().item():
+        logger.error(f"NaNs encountered in pinv")
+        
+    W = pinv @ X
+    
+    if torch.isnan(W).any().item():
+        logger.error(f"NaNs encountered in pinv @ X")
 
     W = quantize(W, B=B2)
 
+    if torch.isnan(W).any().item():
+        logger.error(f"NaNs encountered in Q(pinv @ X)")
     # Return the scaled and shifted output
-    return normalize_and_shift_wrt_inner_prod(X, Z @ W)
+    
+    out = normalize_and_shift_wrt_inner_prod(X, Z @ W)
+    
+    if torch.isnan(out).any().item():
+        logger.error(f"NaNs encountered in LPLRed matrix")
+    out = out.type(orig_dtype)
+    return out
 
 
 def direct_svd_quant(
