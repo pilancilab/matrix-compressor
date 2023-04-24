@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from loguru import logger
-from hlb import repo_basepath
+from shared import repo_basepath
 from hlb.config import hyp
 from hlb.nn.speedyresnet import (
     BatchNorm,
