@@ -30,6 +30,3 @@ def normalize_and_shift_wrt_inner_prod(X: torch.Tensor = None, Y: torch.Tensor =
     return alpha * Y + beta * M
 
 
-def error(target, estimated):
-    tfro = torch.linalg.norm(target, "fro")
-    return torch.linalg.norm(estimated - target, "fro") / tfro
