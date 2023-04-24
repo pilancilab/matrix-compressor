@@ -85,15 +85,20 @@ def fb_load(
     return generator
 
 
-def hf_load(path: str) -> LLaMA:
+def hf_load(path: str, device="auto", skip_tokenizer=False) -> LLaMA:
     from transformers import AutoTokenizer, AutoModelForCausalLM
 
+    logger.trace("Loading CausalLM Model")
+    model = AutoModelForCausalLM.from_pretrained(path, device_map=device)
+    logger.trace("Loaded CausalLM model")
+    
+    if skip_tokenizer:
+        return model
+    
     logger.trace("Loading Tokenizer")
-    tokenizer = AutoTokenizer.from_pretrained(path)
+    tokenizer = AutoTokenizer.from_pretrained(path, device_map=device)
     logger.trace("Loaded Tokenizer")
     
-    logger.trace("Loading CausalLM Model")
-    model = AutoModelForCausalLM.from_pretrained(path)
-    logger.trace("Loaded CausalLM model")
+    
     generator = LLaMA(model, tokenizer)
     return generator
