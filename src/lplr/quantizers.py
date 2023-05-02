@@ -29,8 +29,9 @@ def quantize(
             out = X.half() if not full_range else X.bfloat16()
         case _:
             if simulate:
-                logger.warning("Forced simulation of quantization")
-            logger.warning(f"Using simulation to quantize to {B} bits")
+                logger.warning(f"Forced quantization simulation to {B} bits")
+            else:
+                logger.warning(f"Using simulation to quantize to {B} bits")
 
             M = 2**B  # No. of quantization points per dimension
             res = 2 / (M - 1)  # Resolution
