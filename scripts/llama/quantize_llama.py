@@ -1,0 +1,41 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+from loguru import logger
+
+import torch
+import torch.nn as nn
+from llama_compression import hf_load, setup_model_parallel
+from lplr.compressors import lplr
+import fire
+import pathlib
+from tqdm import tqdm
+
+def main(
+    ckpt_dir: pathlib.Path = "./artifacts/llama-7b-hf",
+    out_dir: pathlib.Path = "./artifacts/llama-quantized",
+    b1: int = 16,
+    b2: int = 16,
+    f: float = 0.7,
+):
+    generator = hf_load(ckpt_dir, skip_tokenizer=True)
+    model = generator.model
+    logger.debug(f"Quantizing model using B1 = {b1} and B2 = {b2}")
+    with torch.no_grad():
+        from math import ceil, floor
+
+        for name, layer in tqdm(model.named_parameters()):
+            param = layer.data.detach()
+            assumed_rank = ceil(f * min(param.shape))
+            if param.ndim == 2:
+                layer.data = lplr(param, r=assumed_rank, B1=b1, B2=b2)
+            logger.debug(
+                f"Quantizing layer: {name} with shape {layer.shape} on device {layer.device}"
+            )
+    pathlib.Path(out_dir).mkdir(parents=True, exist_ok=True)
+    logger.debug(f"Saving quantized model to {out_dir}")
+    model.save_pretrained(out_dir)
+
+
+if __name__ == "__main__":
+    fire.Fire(main)
