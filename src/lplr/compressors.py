@@ -3,7 +3,6 @@ import torch
 import math
 from .quantizers import quantize
 from .utils import normalize_and_shift_wrt_inner_prod
-from . import SEED
 from loguru import logger
 
 
@@ -13,18 +12,25 @@ def uncompressed(X: torch.Tensor = None) -> torch.Tensor:
 
 
 def lplr(
-    X: torch.Tensor = None, r: int = None, B1: int = 8, B2: int = 8
+    X: torch.Tensor = None,
+    r: int = None,
+    B1: int = 8,
+    B2: int = 8,
+    normalize_and_shift=False,
+    seed=None,
+    q = 0,
 ) -> torch.Tensor:
     """
     :param X: Target matrix
     :param r: Inherent rank
     :param B1: Bit-budget for first low-rank factor
     :param B2: Bit-budget for second low-rank factor
+    :param q: No. of power iterations
     :return: Low-precision Low-rank approximation
     """
-
-    logger.trace(f"Using seed = {SEED}")
-    torch.random.manual_seed(SEED)
+    if seed is not None:
+        logger.trace(f"Using seed = {seed}")
+        torch.random.manual_seed(seed)
     orig_dtype = X.dtype
     X = X.float()
     # Sketch the column space of X with S matrix
@@ -34,9 +40,15 @@ def lplr(
 
     # Quantize the sketched matrix and get the first low-rank factor
     logger.trace(f"X.dtype = {X.dtype}")
-    Z = quantize(X=X @ S, B=B1)
+
+    Y = X @ S
+    for k in range(q):
+        print(f"Running power iteration: {k}/{q}")
+        Y = X @ (X.T @ Y)
+
+    Z = quantize(X=Y, B=B1, preserve_original_dtype=True)
     logger.trace(f"Z.dtype = {Z.dtype}")
-    
+
     if torch.isnan(Z).any().item():
         logger.error(f"NaNs encountered in right sketched matrix")
 
@@ -44,20 +56,22 @@ def lplr(
     pinv = torch.linalg.pinv(Z.float()).type(X.dtype)
     if torch.isnan(pinv).any().item():
         logger.error(f"NaNs encountered in pinv")
-        
+
     W = pinv @ X
-    
+
     if torch.isnan(W).any().item():
         logger.error(f"NaNs encountered in pinv @ X")
 
-    W = quantize(W, B=B2)
+    W = quantize(W, B=B2, preserve_original_dtype=True)
 
     if torch.isnan(W).any().item():
         logger.error(f"NaNs encountered in Q(pinv @ X)")
     # Return the scaled and shifted output
-    
-    out = normalize_and_shift_wrt_inner_prod(X, Z @ W)
-    
+
+    out = Z @ W
+    if normalize_and_shift:
+        out = normalize_and_shift_wrt_inner_prod(X, Z @ W)
+
     if torch.isnan(out).any().item():
         logger.error(f"NaNs encountered in LPLRed matrix")
     out = out.type(orig_dtype)
@@ -65,7 +79,7 @@ def lplr(
 
 
 def direct_svd_quant(
-    X: torch.Tensor, r: int = None, B1: int = 8, B2: int = 8
+    X: torch.Tensor, r: int = None, B1: int = 8, B2: int = 8, f: float = None, eps=1e-5
 ) -> torch.Tensor:
     """
     Compute the full SVD and naively quantize each low rank factor
@@ -75,10 +89,18 @@ def direct_svd_quant(
     :param B2: Bit-budget for the second low-rank factor
     :return: A (naive) low-precision low-rank approximation of X
     """
-    torch.random.manual_seed(SEED)
+
+    if r is None and f is None:
+        raise ValueError("Atleast one of target rank or fraction must be provided.")
 
     # Compute full SVD
     U, S, VT = torch.linalg.svd(X.float(), full_matrices=False)
+    if r is None:
+        rank = torch.sum(S >= eps)
+        r = int(torch.ceil(f * rank).item())
+        logger.info(
+            f"Quantizing to rank = {r} using fraction = {f:.3f} with original rank = {rank}"
+        )
     U = U[:, 0:r]
     S = S[0:r]
     VT = VT[0:r, :]
@@ -91,7 +113,8 @@ def direct_svd_quant(
     W = VT
     W = quantize(W, B=B2)
 
-    return normalize_and_shift_wrt_inner_prod(X, Z @ W)
+    # return normalize_and_shift_wrt_inner_prod(X, Z @ W)
+    return Z @ W
 
 
 def iterative_lplr(
