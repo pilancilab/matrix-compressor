@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fairscale.nn.model_parallel.initialize import initialize_model_parallel
 
-from .llama import ModelArgs, Transformer, Tokenizer, LLaMA
+from .fb_llama import ModelArgs, Transformer, Tokenizer, LLaMA
 
 from loguru import logger
 

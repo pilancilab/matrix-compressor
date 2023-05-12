@@ -2,7 +2,7 @@ from loguru import logger
 
 import torch
 import torch.nn as nn
-from llama_compression import hf_load, setup_model_parallel
+from llama import hf_load, setup_model_parallel
 
 
 def main():

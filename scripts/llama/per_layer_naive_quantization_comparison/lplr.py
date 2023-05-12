@@ -1,3 +1,17 @@
+"""
+RUN Commands
+
+export OUTPUT_DIRECTORY="./misc/llama/layer-wise-lplr-naive-quant-comparison"
+export MODEL_DIRECTORY="./artifacts/llama-7b-hf/"
+export LOGURU_LEVEL=INFO
+
+
+# Gaussian
+stdbuf -oL python scripts/llama/layer_wise_lplr_quantization.py --model-directory $MODEL_DIRECTORY --output-directory $OUTPUT_DIRECTORY --b1 8 --b2 8 --b_nq 8 --cr 1 --map-location "cuda:1" 2>&1 | stdbuf -oL tee -i $OUTPUT_DIRECTORY/quantization-$(date +%m%d%H%M%S).log
+
+# Sparse JL
+stdbuf -oL python scripts/llama/layer_wise_lplr_quantization.py --model-directory $MODEL_DIRECTORY --output-directory $OUTPUT_DIRECTORY --b1 8 --b2 8 --b_nq 8 --cr 1 --map-location "cuda:2" 2>&1 --sketch SparseJL --sparse-jl-s 1 | stdbuf -oL tee -i $OUTPUT_DIRECTORY/quantization-$(date +%m%d%H%M%S).log
+"""
 import json
 import pathlib
 import sys
@@ -9,8 +23,10 @@ from loguru import logger
 
 from lplr.compressors import lplr
 from lplr.quantizers import quantize
+from lplr.utils import maximum_output_rank
 from shared.error import relative_tensor_error
 from natsort import natsorted, ns
+
 
 def main(
     model_directory: pathlib.Path | str,
@@ -18,7 +34,10 @@ def main(
     b1: int = 8,
     b2: int = 8,
     cr: float = 1,
+    b_nq: int = 8,
     map_location: str = "cuda:0",
+    sketch: str = "Gaussian",
+    **kwargs,
 ):
     """_summary_
 
@@ -50,17 +69,33 @@ def main(
                 max_dim = weights.shape[0]
                 assert max_dim >= min_dim
 
-                output_rank = ceil(cr * ((min_dim * max_dim) / (min_dim + max_dim)))
+                col_input = weights
+                row_input = weights.T
 
-                row_sketch = lplr(weights.T, output_rank, b1, b2)
-                col_sketch = lplr(weights, output_rank, b1, b2)
+                col_output_rank = maximum_output_rank(cr, b1, b2, b_nq, col_input.shape)
+                row_output_rank = maximum_output_rank(cr, b1, b2, b_nq, row_input.shape)
+                logger.debug(f"Name: {name} "
+                    f"Shape: {weights.shape} "
+                    f"Row Output Rank: {row_output_rank} "
+                    f"Col Output Rank: {col_output_rank}"
+                    )
 
-                row_sketch_err = relative_tensor_error(weights.T, row_sketch)
-                col_sketch_err = relative_tensor_error(weights, col_sketch)
-
-                naive_quant = quantize(weights, b1, preserve_original_dtype=True)
-                naive_quant_err = relative_tensor_error(weights, naive_quant)
+                if b1 == b2:
+                    assert col_output_rank == row_output_rank
                 
+                col_sketch = lplr(
+                    col_input, col_output_rank, b1, b2, sketch=sketch, **kwargs
+                )
+                row_sketch = lplr(
+                    row_input, row_output_rank, b1, b2, sketch=sketch, **kwargs
+                )
+
+                col_sketch_err = relative_tensor_error(col_input, col_sketch)
+                row_sketch_err = relative_tensor_error(row_input, row_sketch)
+
+                naive_quant = quantize(weights, b_nq, preserve_original_dtype=True)
+                naive_quant_err = relative_tensor_error(weights, naive_quant)
+
                 if transpose:
                     row_sketch_err, col_sketch_err = col_sketch_err, row_sketch_err
                 logger.info(
@@ -73,11 +108,7 @@ def main(
                     f"Compression Ratio: {cr}"
                 )
             else:
-                logger.info(
-                    f"Name: {name} "
-                    f"Shape: {weights.shape} "
-                    f"Unmodified"
-                )
+                logger.info(f"Name: {name} " f"Shape: {weights.shape} " f"Unmodified")
 
 
 if __name__ == "__main__":

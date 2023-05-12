@@ -1,6 +1,6 @@
 from loguru import logger
 
-from llama_compression import fb_load, setup_model_parallel
+from llama import fb_load, setup_model_parallel
 
 
 def main():
