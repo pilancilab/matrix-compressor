@@ -166,3 +166,4 @@ misc/
 **/exp*.py
 **/debug*.py
 notebooks/
+shell-scripts
