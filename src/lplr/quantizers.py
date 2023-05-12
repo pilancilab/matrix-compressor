@@ -8,7 +8,8 @@ def quantize(
     B: int = 16,
     full_range: bool = False,
     simulate: bool = False,
-    preserve_original_dtype=False
+    preserve_original_dtype=False,
+    force=False
 ) -> torch.Tensor:
     """
     Element-wise matrix quantization for general bit-budget
@@ -20,6 +21,13 @@ def quantize(
     :return: Quantized matrix
     """
     orig_dtype = X.dtype
+    device = X.device
+    if B == 16 and device == torch.device("cpu"):
+        logger.warning(
+            f"Setting simulate = True as Half() dtype is not supported on CPU"
+        )
+        simulate = True
+    
     match B:
         case 64 if not simulate:
             out = X.double()
@@ -63,16 +71,13 @@ def quantize(
             Q[mask * mask0] = U[mask * mask0]
 
             # Re-normalize the quantized matrix back to its input scale
-            Qr = (
-                torch.from_numpy(
-                    np.interp(
-                        Q.to("cpu").numpy(),
-                        (Q.min().item(), Q.max().item()),
-                        (X_min, X_max),
-                    )
+            Qr = torch.from_numpy(
+                np.interp(
+                    Q.to("cpu").numpy(),
+                    (Q.min().item(), Q.max().item()),
+                    (X_min, X_max),
                 )
-                .to(X.device)
-            )
+            ).to(X.device)
             logger.trace(f"Qr.dtype = {Qr.dtype}, Qr.device = {Qr.device}")
             out = Qr
     if preserve_original_dtype:

@@ -2,8 +2,16 @@ import numpy as np
 import torch
 import math
 from .quantizers import quantize
-from .utils import normalize_and_shift_wrt_inner_prod
+from .utils import normalize_and_shift_wrt_inner_prod, sparse_jl_transform
 from loguru import logger
+from enum import Enum
+
+
+class Sketch(Enum):
+    GAUSSIAN = "Gaussian"
+    HADAMARD = "Hadamard"
+    SPARSE_JL = "SparseJL"
+    NOTHING = "Nothing"
 
 
 def uncompressed(X: torch.Tensor = None) -> torch.Tensor:
@@ -18,11 +26,13 @@ def lplr(
     B2: int = 8,
     normalize_and_shift=False,
     seed=None,
-    q = 0,
+    q=0,
+    sketch: Sketch = Sketch.GAUSSIAN,
+    **kwargs,
 ) -> torch.Tensor:
     """
     :param X: Target matrix
-    :param r: Inherent rank
+    :param r: Target rank
     :param B1: Bit-budget for first low-rank factor
     :param B2: Bit-budget for second low-rank factor
     :param q: No. of power iterations
@@ -33,8 +43,23 @@ def lplr(
         torch.random.manual_seed(seed)
     orig_dtype = X.dtype
     X = X.float()
-    # Sketch the column space of X with S matrix
-    S = torch.randn(X.shape[1], r, device=X.device, dtype=X.dtype) / math.sqrt(r)  # Gaussian sketching matrix
+
+    sketch = Sketch(sketch)
+    match sketch:
+        case Sketch.GAUSSIAN:
+            # Sketch the column space of X with S matrix
+            S = torch.randn(X.shape[1], r, device=X.device, dtype=X.dtype) / math.sqrt(
+                r
+            )  # Gaussian sketching matrix
+        case Sketch.SPARSE_JL:
+            S = (
+                sparse_jl_transform(X.shape[1], r, kwargs.get("sparse_jl_s"))
+                .to(X.device)
+                .type(X.dtype)
+            )
+        case _:
+            logger.error(f"Unknown sketch type = {sketch}")
+            raise ValueError(f"Unknown sketch type")
 
     logger.trace(f"S.dtype = {S.dtype}, X.dtype={X.dtype}")
 
@@ -138,3 +163,88 @@ def iterative_lplr(
         Xres -= Xq
 
     return normalize_and_shift_wrt_inner_prod(X, X_app)
+
+
+def lplr_svd(
+    X: torch.Tensor = None,
+    r: int = None,
+    B1: int = 8,
+    B2: int = 8,
+    normalize_and_shift=False,
+    seed=None,
+    sketch: Sketch = Sketch.GAUSSIAN,
+    **kwargs,
+) -> torch.Tensor:
+    """
+    :param X: Target matrix
+    :param r: Output rank
+    :param B1: Bit-budget for first low-rank factor
+    :param B2: Bit-budget for second low-rank factor
+    :param q: No. of power iterations
+    :param sketch: Specify the sketching matrix use for the first low-rank factor
+    :return: Low-precision Low-rank approximation
+    """
+
+    if seed is not None:
+        logger.trace(f"Using seed = {seed}")
+        torch.random.manual_seed(seed)
+
+    orig_dtype = X.dtype
+    X = X.float()  # Do simulations in float
+
+    # Compute SVD
+    U, Σ, VT = torch.linalg.svd(X.float(), full_matrices=False)
+
+    # Extract singular values and singular vectors
+    U = U[:, 0:r]
+    Σ = Σ[0:r]
+    VT = VT[0:r, :]
+
+    sketch = Sketch(sketch)
+    # Compute the first quantized low-rank factor
+    match sketch:
+        case Sketch.GAUSSIAN:
+            Z = U @ torch.diag(Σ)
+
+            # Sketch the column space of Z with S matrix
+            S = torch.randn(Z.shape[1], r, device=X.device, dtype=X.dtype) / math.sqrt(
+                r
+            )  # Gaussian sketching matrix
+
+            Z = quantize(Z @ S, B=B1, preserve_original_dtype=True)
+        case Sketch.NOTHING:
+            Z = U @ torch.diag(Σ)
+            Z = quantize(Z, B=B1, preserve_original_dtype=True)
+        case Sketch.SPARSE_JL:
+            Z = U @ torch.diag(Σ)
+            S = (
+                sparse_jl_transform(Z.shape[1], r, kwargs.get("sparse_jl_s"))
+                .to(Z.device)
+                .type(Z.dtype)
+            )
+            Z = quantize(Z @ S, B=B1, preserve_original_dtype=True)
+        case _:
+            logger.error(f"Unsupported sketch type {sketch}")
+
+    # Compute the second low-rank factor
+    pinv = torch.linalg.pinv(Z.float()).type(X.dtype)
+    if torch.isnan(pinv).any().item():
+        logger.error(f"NaNs encountered in pinv")
+
+    W = pinv @ X
+
+    if torch.isnan(W).any().item():
+        logger.error(f"NaNs encountered in pinv @ X")
+
+    # Quantize the second low-rank factor
+    W = quantize(W, B=B2, preserve_original_dtype=True)
+
+    out = Z @ W
+    if normalize_and_shift:
+        out = normalize_and_shift_wrt_inner_prod(X, Z @ W)
+
+    if torch.isnan(out).any().item():
+        logger.error(f"NaNs encountered in LPLRed matrix")
+    out = out.type(orig_dtype)
+
+    return out
