@@ -2,7 +2,7 @@
 RUN Commands
 
 export OUTPUT_DIRECTORY="./misc/llama/layer-wise-lplr-naive-quant-comparison"
-export MODEL_DIRECTORY="./artifacts/llama-7b-hf/"
+export MODEL_DIRECTORY="./artifacts/LLAMA/llama-7b-hf/"
 export LOGURU_LEVEL=INFO
 
 

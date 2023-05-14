@@ -12,8 +12,8 @@ import pathlib
 from tqdm import tqdm
 
 def main(
-    ckpt_dir: pathlib.Path = "./artifacts/llama-7b-hf",
-    out_dir: pathlib.Path = "./artifacts/llama-quantized",
+    ckpt_dir: pathlib.Path = "./artifacts/LLAMA/llama-7b-hf",
+    out_dir: pathlib.Path = "./artifacts/LLAMA/llama-quantized",
     b1: int = 16,
     b2: int = 16,
     f: float = 0.7,

@@ -3,7 +3,7 @@
 
 """Usage
 
-❱ B1=8 B2=8 BNQ=8 python scripts/mnetv3/cifar10-faiss-embeddings-preloaded.py --quant-directory artifacts/custom_data/knn/mnetv3/cifar10-
+❱ B1=8 B2=8 BNQ=8 python scripts/mnetv3/cifar10_faiss_embeddings_preloaded.py --quant-directory artifacts/custom_data/knn/mnetv3/cifar10-
 quantized/train/b1_$B1-b2_$B2-bnq_$BNQ --b1 $B1 --b2 $B2 --b_nq $BNQ --train-dir artifacts/custom_data/knn/mnetv3/cifar10 --eval-train
 """
 # In[1]:

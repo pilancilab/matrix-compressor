@@ -3,7 +3,7 @@
 RUN Commands
 
 export OUTPUT_DIRECTORY="./misc/llama/layer-wise-lplr-naive-quant-comparison"
-export MODEL_DIRECTORY="./artifacts/llama-7b-hf/"
+export MODEL_DIRECTORY="./artifacts/LLAMA/llama-7b-hf/"
 export LOGURU_LEVEL=INFO
 stdbuf -oL python scripts/llama/layer_wise_residual_quantization.py --model-directory $MODEL_DIRECTORY --output-directory $OUTPUT_DIRECTORY --b1 8 --b2 8 --b_nq 8 --cr 1 --map-location "cuda:1" 2>&1 | stdbuf -oL tee -i $OUTPUT_DIRECTORY/residual-quantization-$(date +%m%d%H%M%S).log
 """

@@ -16,7 +16,7 @@ transform = transforms.Compose(
 
 # Load the CIFAR-10 dataset
 train_set = torchvision.datasets.CIFAR10(
-    root="/home/rsaha/varun/matrix-compressor/datasets",
+    root="/home/rsaha/varun/matrix-compressor/artifacts/datasets",
     train=True,
     download=True,
     transform=transform,

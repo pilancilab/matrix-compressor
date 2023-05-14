@@ -7,7 +7,7 @@ from llama import hf_load, setup_model_parallel
 
 def main():
     torch.set_printoptions(precision=3)
-    ckpt_dir = "./artifacts/llama-7b-hf"
+    ckpt_dir = "./artifacts/LLAMA/llama-7b-hf"
 
     generator = hf_load(ckpt_dir)
     # param_dict = {}

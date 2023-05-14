@@ -85,13 +85,13 @@ def extract_embeddings(dataloader, model):
 
 # Load the CIFAR-10 dataset
 trainset = torchvision.datasets.CIFAR10(
-    root="/home/rsaha/varun/matrix-compressor/datasets",
+    root="/home/rsaha/varun/matrix-compressor/artifacts/datasets",
     train=True,
     download=True,
     transform=transform,
 )
 testset = torchvision.datasets.CIFAR10(
-    root="/home/rsaha/varun/matrix-compressor/datasets",
+    root="/home/rsaha/varun/matrix-compressor/artifacts/datasets",
     train=False,
     download=True,
     transform=transform,
