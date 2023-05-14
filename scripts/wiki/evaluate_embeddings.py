@@ -78,8 +78,8 @@ def parse():
         "-i",
         "--input",
         type=str,
-        default="/home/rsaha/varun/matrix-compressor/artifacts/wikipedia/wikitext-2-raw",
-        help="Path to input file",
+        default="artifacts/wikipedia/wikitext-2-raw",
+        help="Path to input directory",
     )
     parser.add_argument(
         "--b1",
@@ -190,7 +190,7 @@ X_lplr = lplr(X, col_output_rank, b1, b2, sketch=sketch, sparse_jl_s=sparse_jl_s
 col_sketch_err = relative_tensor_error(X, X_lplr)
 logger.trace(f"Finished LPLR with col sketch error = {col_sketch_err:.3f}")
 
-# Train a nearest neighbors classifier using the naively quantized embeddings
+# Train a nearest neighbors classifier using the LPLR quantized embeddings
 knn_lplr = FaissKNeighborsCPU(k)
 logger.trace(f"Initiating fit on LPLR array")
 knn_lplr.fit(X_lplr, torch.empty(X_lplr.shape[0]))
@@ -212,7 +212,7 @@ logger.info(f"LPLR Dists {evaluate_distances(lplr_ind, X, test_tensor)}")
 # row_sketch_err = relative_tensor_error(X.T, X_lplr_row)
 # logger.trace(f"Finished LPLR with row sketch error = {row_sketch_err:.3f}")
 
-# # Train a nearest neighbors classifier using the naively quantized embeddings
+# # Train a nearest neighbors classifier using the LPLR quantized embeddings
 # knn_lplr_row = FaissKNeighborsCPU(k)
 # logger.trace(f"Initiating fit on LPLR array")
 # knn_lplr_row.fit(X_lplr_row.T, torch.empty(X_lplr_row.T.shape[0]))
