@@ -167,3 +167,5 @@ misc/
 **/debug*.py
 notebooks/
 shell-scripts
+config/settings.toml
+repos
