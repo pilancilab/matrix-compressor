@@ -2,7 +2,6 @@ import numpy as np
 import faiss
 import torch
 
-
 class FaissKNeighborsCPU:
     def __init__(self, k=5):
         self.index = None
@@ -20,8 +19,8 @@ class FaissKNeighborsCPU:
         assert isinstance(y, type(X))
         self.index.add(X)
         self.y = y
-
-    def predict(self, X):
+        
+    def predict_neighbors(self, X):
         if isinstance(X, torch.Tensor):
             X = X.float()
         elif isinstance(X, np.ndarray):
@@ -30,6 +29,10 @@ class FaissKNeighborsCPU:
             raise ValueError(f"Unknown type {type(X)} for input X")
 
         distances, indices = self.index.search(X, k=self.k)
+        return distances, indices
+
+    def predict(self, X):
+        _, indices = self.predict_neighbors(X)
         votes = self.y[indices]
         predictions = np.array([np.argmax(np.bincount(x)) for x in votes])
         return predictions
