@@ -289,28 +289,8 @@ logger.trace(f"finished fit on LPLR array")
 
 test_lplr_predictions = knn_lplr.predict(test_tensor)
 logger.info(classification_report(test_labels, test_lplr_predictions))
+
 # %%
-# # KNN LPLR ROW
-
-# row_output_rank = maximum_output_rank(cr, b1, b2, b_nq, X.T.shape)
-# logger.trace(f"Initiating LPLR with params = {b1} {b2} {b_nq} {cr}")
-
-# X_lplr_row = lplr(X.T, row_output_rank, b1, b2, sketch=sketch, sparse_jl_s=sparse_jl_s)
-# row_sketch_err = relative_tensor_error(X.T, X_lplr_row)
-# logger.trace(f"Finished LPLR with row sketch error = {row_sketch_err:.3f}")
-
-# # Train a nearest neighbors classifier using the LPLR quantized embeddings
-# knn_lplr_row = FaissKNeighborsCPU(k)
-# logger.trace(f"Initiating fit on LPLR array")
-# knn_lplr_row.fit(X_lplr_row.T, torch.empty(X_lplr_row.T.shape[0]))
-# logger.trace(f"finished fit on LPLR array")
-
-# lplr_dists_row, lplr_ind_row = knn_lplr.predict_neighbors(test_tensor)
-
-# logger.info(f"LPLR IOU: {evaluate(tr_ind, lplr_ind_row)}")
-# logger.info(f"LPLR Dists {evaluate_distances(lplr_ind_row, X, test_tensor)}")
-# %%
-
 logger.info(
     f"Col Sketch Error: {col_sketch_err:.3f} "
     # f"Row Sketch Error: {row_sketch_err:.3f} "

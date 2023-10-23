@@ -37,7 +37,6 @@ args = parser.parse_known_args()
 
 map_location = args[0].map_location
 out_path = repo_basepath / args[0].out_path
-model_name: Final = "vit_b_16"
 
 if out_path.exists():
     confirm = input("Output path already exists, continue? (y/n)")
