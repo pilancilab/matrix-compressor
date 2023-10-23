@@ -20,12 +20,12 @@ from math import ceil
 import fire
 import torch
 from loguru import logger
+from natsort import natsorted, ns
 
 from lplr.compressors import lplr
 from lplr.quantizers import quantize
 from lplr.utils import maximum_output_rank
 from shared.error import relative_tensor_error
-from natsort import natsorted, ns
 
 
 def main(
