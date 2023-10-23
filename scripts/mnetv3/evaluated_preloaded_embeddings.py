@@ -18,6 +18,7 @@ from loguru import logger
 from sklearn.metrics import accuracy_score, classification_report
 
 from knn.faiss_knn import FaissKNeighborsCPU
+from lplr.compressors import lplr_svd
 from shared import repo_basepath
 from shared.error import relative_tensor_error
 
@@ -68,6 +69,13 @@ train_labels: Final = torch.cat(
 train_embeddings_lplr: Final = torch.cat(
     [qtd["lplr"] for qtd in quantized_training_data]
 )
+train_embeddings_svd: Final = torch.cat(
+    [qtd["svd"] for qtd in quantized_training_data]
+)
+
+train_embeddings_lplr_svd: Final = torch.cat(
+    [qtd["lplr_svd"] for qtd in quantized_training_data]
+)
 
 
 # In[]
@@ -95,7 +103,7 @@ if known_args.eval_train:
     test_predictions = knn_tr.predict(test_embeddings)
     logger.trace(f"Finished predictions on test embeddings")
 
-    print(f"Baseline Results")
+    print(f"Baseline Train Results")
     print(classification_report(test_labels, test_predictions))
 
 # In[]:
@@ -115,6 +123,7 @@ logger.trace(f"Finished predictions on test embeddings")
 # In[ ]:
 
 print(f"Naive Quantization Results with b_nq = {b_nq}")
+print(f"NQ Error: {relative_tensor_error(train_embeddings, train_embeddings_nq)}")
 print(classification_report(test_labels, test_nq_predictions))
 
 
@@ -126,11 +135,11 @@ nb_seed = 42
 
 # In[ ]:
 
-X_train_lplr = train_embeddings_lplr
+X_lplr = train_embeddings_lplr
 # Train a nearest neighbors classifier using the naively quantized embeddings
 knn_lplr = FaissKNeighborsCPU(3)
 logger.trace(f"Initiating fit on LPLR array")
-knn_lplr.fit(X_train_lplr, train_labels)
+knn_lplr.fit(X_lplr, train_labels)
 logger.trace(f"finished fit on LPLR array")
 
 # Evaluate the classifier on the test set
@@ -138,4 +147,32 @@ logger.trace(f"finished fit on LPLR array")
 test_lplr_predictions = knn_lplr.predict(test_embeddings)
 
 print(f"LPLR Results with b_1 = {b1} b_2 = {b2} b_nq = {b_nq} CR = {c}")
+print(f"LPLR Error: {relative_tensor_error(train_embeddings, X_lplr)}")
 print(classification_report(test_labels, test_lplr_predictions))
+
+
+# %%
+X_svd = train_embeddings_svd
+
+knn_svd = FaissKNeighborsCPU(3)
+logger.trace(f"Initiating fit on svd array")
+knn_svd.fit(X_svd, train_labels)
+logger.trace(f"Finished fit on svd array")
+
+test_svd_predictions = knn_svd.predict(test_embeddings)
+
+print(f"SVD Error: {relative_tensor_error(train_embeddings, X_svd)}")
+print(classification_report(test_labels, test_svd_predictions))
+
+# %%
+X_lp_svd = train_embeddings_lplr_svd
+
+knn_lp_svd = FaissKNeighborsCPU(3)
+logger.trace(f"Initiating fit on lplr svd array")
+knn_lp_svd.fit(X_lp_svd, train_labels)
+logger.trace(f"Finished fit on lplr svd array")
+
+test_lp_svd_predictions = knn_lp_svd.predict(test_embeddings)
+
+print(f"LPLR SVD Error: {relative_tensor_error(train_embeddings, X_lp_svd)}")
+print(classification_report(test_labels, test_lp_svd_predictions))

@@ -15,7 +15,7 @@ import torch
 from loguru import logger
 from tqdm import tqdm
 
-from lplr.compressors import direct_svd_quant, lplr
+from lplr.compressors import direct_svd_quant, lplr, lplr_svd
 from lplr.quantizers import quantize
 from lplr.utils import maximum_output_rank
 from mnet.utils import extract_embeddings
@@ -91,24 +91,42 @@ def main(
             idxs = labels == label
             X = data[idxs]
             logger.info(f"{X.shape}")
-            assert X.shape[0] > X.shape[1]
+            
+            transpose=False
+            if X.shape[0] < X.shape[1]:
+                transpose = True
+                X = X.T
             col_output_rank = maximum_output_rank(cr, b1, b2, b_nq, X.shape)
 
             X_lplr = lplr(X, col_output_rank, b1, b2, sketch=sketch, **kwargs)
             col_sketch_err = relative_tensor_error(X, X_lplr)
+            
+            X_svd = direct_svd_quant(X, col_output_rank, b1, b2)
+            svd_err = relative_tensor_error(X, X_svd)
+            
+            X_lplr_svd = lplr_svd(X, col_output_rank, b1, b2, sketch=sketch)
+            lplr_svd_err = relative_tensor_error(X, X_lplr_svd)
 
             X_nq = quantize(X, b_nq, preserve_original_dtype=True)
             naive_quant_err = relative_tensor_error(X, X_nq)
 
+            if transpose:
+                X_lplr = X_lplr.T
+                X_svd = X_svd.T
+                X_lplr_svd = X_lplr_svd.T
+                X_nq = X_nq.T
+            
             logger.info(
                 f"Label: {label} "
                 f"Col Sketch Error: {col_sketch_err:.3f} "
+                f"SVD Error: {svd_err:.3f} "
+                f"LPLR SVD Error: {lplr_svd_err:.3f} "
                 f"Dtype: {X.dtype} "
                 f"Naive Quant Err: {naive_quant_err:.3f} "
             )
 
             torch.save(
-                dict(nq=X_nq, lplr=X_lplr, label=label),
+                dict(nq=X_nq, lplr=X_lplr, svd=X_svd, lplr_svd=X_lplr_svd, label=label),
                 output_dir / f"cifar10q-class={label}.pt"
             )
 

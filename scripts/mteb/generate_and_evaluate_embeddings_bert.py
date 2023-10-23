@@ -26,7 +26,7 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 
 from knn.faiss_knn import FaissKNeighborsCPU
-from lplr.compressors import Sketch, lplr
+from lplr.compressors import Sketch, direct_svd_quant, lplr, lplr_svd
 from lplr.quantizers import quantize
 from lplr.utils import maximum_output_rank
 from mnet.utils import extract_embeddings
@@ -115,14 +115,6 @@ def parse():
     # Generic
     parser.add_argument("--map-location", default="cpu")
     
-    
-    parser.add_argument(
-        "-i",
-        "--input",
-        type=str,
-        default="artifacts/wikipedia/wikitext-2-raw",
-        help="Path to input directory",
-    )
     parser.add_argument(
         "--b1",
         type=int,
@@ -210,7 +202,6 @@ assert test_data.shape[0] == len(test_labels)
 assert train_data.shape[0] == len(train_labels)
 
 # Sketching Args
-input_dir = pathlib.Path(args.input)
 cr = args.cr
 b1 = args.b1
 b2 = args.b2
@@ -296,31 +287,41 @@ logger.trace(f"finished fit on LPLR array")
 
 test_lplr_predictions = knn_lplr.predict(test_tensor)
 logger.info(classification_report(test_labels, test_lplr_predictions))
+
 # %%
-# # KNN LPLR ROW
+X_svd = direct_svd_quant(X, col_output_rank, b1, b2)
 
-# row_output_rank = maximum_output_rank(cr, b1, b2, b_nq, X.T.shape)
-# logger.trace(f"Initiating LPLR with params = {b1} {b2} {b_nq} {cr}")
+svd_err = relative_tensor_error(X, X_svd)
+logger.trace(f"Finished LPLR with svd error = {svd_err:.3f}")
 
-# X_lplr_row = lplr(X.T, row_output_rank, b1, b2, sketch=sketch, sparse_jl_s=sparse_jl_s)
-# row_sketch_err = relative_tensor_error(X.T, X_lplr_row)
-# logger.trace(f"Finished LPLR with row sketch error = {row_sketch_err:.3f}")
+knn_svd = FaissKNeighborsCPU(k)
+logger.trace(f"Initiating fit on svd array")
+knn_svd.fit(X_svd, train_labels)
+logger.trace(f"Finished fit on svd array")
 
-# # Train a nearest neighbors classifier using the LPLR quantized embeddings
-# knn_lplr_row = FaissKNeighborsCPU(k)
-# logger.trace(f"Initiating fit on LPLR array")
-# knn_lplr_row.fit(X_lplr_row.T, torch.empty(X_lplr_row.T.shape[0]))
-# logger.trace(f"finished fit on LPLR array")
+test_svd_predictions = knn_svd.predict(test_tensor)
+logger.info(classification_report(test_labels, test_svd_predictions))
 
-# lplr_dists_row, lplr_ind_row = knn_lplr.predict_neighbors(test_tensor)
+# %%
+X_lp_svd = lplr_svd(X, col_output_rank, b1, b2, sketch=sketch)
 
-# logger.info(f"LPLR IOU: {evaluate(tr_ind, lplr_ind_row)}")
-# logger.info(f"LPLR Dists {evaluate_distances(lplr_ind_row, X, test_tensor)}")
+lp_svd_err = relative_tensor_error(X, X_lp_svd)
+logger.trace(f"Finished LPLR SVD with sketch error = {lp_svd_err:.3f}")
+
+knn_lp_svd = FaissKNeighborsCPU(k)
+logger.trace(f"Initiating fit on lplr svd array")
+knn_lp_svd.fit(X_lp_svd, train_labels)
+logger.trace(f"Finished fit on lplr svd array")
+
+test_lp_svd_predictions = knn_lp_svd.predict(test_tensor)
+logger.info(classification_report(test_labels, test_lp_svd_predictions))
 # %%
 
 logger.info(
     f"Col Sketch Error: {col_sketch_err:.3f} "
     # f"Row Sketch Error: {row_sketch_err:.3f} "
+    f"SVD Error: {svd_err:.3f} "
+    f"LPLR SVD Error: {lp_svd_err:.3f} "
     f"Dtype: {X.dtype} "
     f"Naive Quant Err: {naive_quant_err:.3f} "
 )

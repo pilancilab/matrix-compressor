@@ -4,6 +4,7 @@
 # In[1]:
 
 
+from datetime import datetime
 import os
 from math import ceil, floor
 import pathlib
@@ -18,7 +19,7 @@ from loguru import logger
 
 from torchvision.models import mobilenet_v3_small, MobileNet_V3_Small_Weights
 from knn.faiss_knn import FaissKNeighborsCPU
-from lplr.compressors import Sketch, lplr
+from lplr.compressors import Sketch, direct_svd_quant, lplr, lplr_svd
 from lplr.quantizers import quantize
 from lplr.utils import maximum_output_rank
 
@@ -118,7 +119,13 @@ def parse():
 # In[]
 # def main():
 args = parse()
-logger.trace(f"Parsed input arguments {args}")
+
+log_file = f"misc/knn/wiki/lplr-svd/eval-{datetime.now().strftime('%m%d-%H%M%S')}.log"
+pathlib.Path(log_file).parent.mkdir(exist_ok=True, parents=True)
+logger.add(sink=open(log_file, "w+"), level="DEBUG")
+logger.info(f"Parsed input arguments {args}")
+
+
 input_dir = pathlib.Path(args.input)
 device = torch.device(args.map_location)
 cr = args.cr
@@ -136,14 +143,14 @@ train_tensor = torch.from_numpy(
 X = train_tensor
 
 
-logger.trace(
+logger.info(
     f"Train tensor loaded with shape = {train_tensor.shape} on device {device}"
 )
 
 test_tensor = torch.from_numpy(
     np.load(input_dir / "wiki.test.raw.stripped.embedding.npz")["embeddings"],
 ).to(device)
-logger.trace(f"Test tensor loaded with shape = {test_tensor.shape} on device {device}")
+logger.info(f"Test tensor loaded with shape = {test_tensor.shape} on device {device}")
 
 assert train_tensor.shape[0] > train_tensor.shape[1]
 
@@ -201,6 +208,39 @@ lplr_dists, lplr_ind = knn_lplr.predict_neighbors(test_tensor)
 logger.info(f"LPLR IOU: {evaluate(tr_ind, lplr_ind)}")
 logger.info(f"LPLR Dists {evaluate_distances(lplr_ind, X, test_tensor)}")
 
+# %%
+
+X_svd = direct_svd_quant(X, col_output_rank, b1, b2)
+
+svd_err = relative_tensor_error(X, X_svd)
+logger.trace(f"Finished LPLR with svd error = {svd_err:.3f}")
+
+knn_svd = FaissKNeighborsCPU(k)
+logger.trace(f"Initiating fit on svd array")
+knn_svd.fit(X_svd, torch.empty(X_svd.shape[0]))
+logger.trace(f"Finished fit on svd array")
+
+svd_dists, svd_ind = knn_svd.predict_neighbors(test_tensor)
+
+logger.info(f"SVD IOU: {evaluate(tr_ind, svd_ind)}")
+logger.info(f"SVD Dists {evaluate_distances(svd_ind, X, test_tensor)}")
+
+
+# %%
+X_lp_svd = lplr_svd(X, col_output_rank, b1, b2, sketch=sketch)
+
+lp_svd_err = relative_tensor_error(X, X_lp_svd)
+logger.trace(f"Finished LPLR SVD with sketch error = {lp_svd_err:.3f}")
+
+knn_lp_svd = FaissKNeighborsCPU(k)
+logger.trace(f"Initiating fit on svd array")
+knn_lp_svd.fit(X_lp_svd, torch.empty(X_lp_svd.shape[0]))
+logger.trace(f"Finished fit on svd array")
+
+lp_svd_dists, lp_svd_ind = knn_lp_svd.predict_neighbors(test_tensor)
+
+logger.info(f"LPLR SVD IOU: {evaluate(tr_ind, lp_svd_ind)}")
+logger.info(f"LPLR SVD Dists {evaluate_distances(lp_svd_ind, X, test_tensor)}")
 
 # %%
 # # KNN LPLR ROW
@@ -227,6 +267,8 @@ logger.info(f"LPLR Dists {evaluate_distances(lplr_ind, X, test_tensor)}")
 logger.info(
     f"Col Sketch Error: {col_sketch_err:.3f} "
     # f"Row Sketch Error: {row_sketch_err:.3f} "
+    f"SVD Error: {svd_err:.3f} "
+    f"LPLR SVD Error: {lp_svd_err:.3f} "
     f"Dtype: {X.dtype} "
     f"Naive Quant Err: {naive_quant_err:.3f} "
 )
