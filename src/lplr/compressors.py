@@ -5,7 +5,7 @@ from .quantizers import quantize
 from .utils import normalize_and_shift_wrt_inner_prod, sparse_jl_transform
 from loguru import logger
 from enum import Enum
-
+from codetiming import Timer
 
 class Sketch(Enum):
     GAUSSIAN = "Gaussian"
@@ -18,7 +18,7 @@ def uncompressed(X: torch.Tensor = None) -> torch.Tensor:
     """No compressor"""
     return X
 
-
+@Timer(name="lplr")
 def lplr(
     X: torch.Tensor = None,
     r: int = None,
@@ -102,7 +102,7 @@ def lplr(
     out = out.type(orig_dtype)
     return out
 
-
+@Timer(name="dsvd")
 def direct_svd_quant(
     X: torch.Tensor, r: int = None, B1: int = 8, B2: int = 8, f: float = None, eps=1e-5
 ) -> torch.Tensor:
@@ -164,7 +164,7 @@ def iterative_lplr(
 
     return normalize_and_shift_wrt_inner_prod(X, X_app)
 
-
+@Timer(name="lsvd")
 def lplr_svd(
     X: torch.Tensor = None,
     r: int = None,

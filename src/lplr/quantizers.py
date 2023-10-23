@@ -1,8 +1,9 @@
 import numpy as np
 import torch
 from loguru import logger
+from codetiming import Timer
 
-
+@Timer(name="quantize")
 def quantize(
     X: torch.Tensor = None,
     B: int = 16,
