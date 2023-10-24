@@ -1,6 +1,6 @@
 # Matrix Compressor
 
-This repository contains code for the paper [Matrix Compression via Randomized Low Rank and Low Precision Factorization](https://arxiv.org/abs/2310.11028) by Rajarshi Saha, Varun Srivastava and Mert Pilanci (NeurIPS 2023).
+This repository contains code for the paper [Matrix Compression via Randomized Low Rank and Low Precision Factorization](https://arxiv.org/abs/2310.11028) by **Rajarshi Saha**, **Varun Srivastava** and **Mert Pilanci (NeurIPS 2023)**.
 
 We propose **LPLR** - a framework for joint rank reduction and quantization to compress large data matrices, with applications in domains such as Natural Language Processing (LLMs), Big Data Processing (retrieval and compression) and more.
 
