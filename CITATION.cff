@@ -1,0 +1,6 @@
+@inproceedings{saha2023lplr,
+    title={{Matrix Compression via Randomized Low Rank and Low Precision Factorization}},
+    author={Rajarshi Saha, Varun Srivastava and Mert Pilanci},
+    booktitle={Advances in Neural Information Processing Systems},
+    year={2023}
+}
