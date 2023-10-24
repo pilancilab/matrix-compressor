@@ -11,28 +11,29 @@ Our algorithm first computes an approximate basis of the range space of $\mathbf
 It then computes approximate projections of the columns of $\mathbf{A}$ onto this quantized basis.
 The tradeoff between compression ratio and approximation accuracy allows for flexibility in choosing these parameters based on specific application requirements.
 
-<figure>
+<p float="left">
 <img src="artifacts/images/original.png" alt="Original image" width="19%">
 <img src="artifacts/images/shepp-logan-rank-166_b1-4_b2-8_b0-2/nq.png" alt="Naïve quant." width="19%">
 <img src="artifacts/images/shepp-logan-rank-166_b1-4_b2-8_b0-2/dsvd.png" alt="DSVD" width="19%">
 <img src="artifacts/images/shepp-logan-rank-166_b1-4_b2-8_b0-2/lplr.png" alt="LPLR (ours)" width="19%">
 <img src="artifacts/images/shepp-logan-rank-166_b1-4_b2-8_b0-2/lplr_svd.png" alt="LSVD (ours)" width="19%">
-</figure>
+</p>
+
 Compression of Shepp-Logan phantom (a standard test image for medical image reconstruction). Naive quant. was done with $2$-bits per pixel of this $10^3 \times 10^3$ image. Quantizing the SVD factors ``directly" (i.e., DSVD) and (our) LPLR/LSVD algorithms factorize the image into a product of tall \& wide matrices reduces the total number of elements, allowing each entry to be represented using upto $8$-bits of precision per pixel. Despite the increase in precision per pixel, the total number of bits remains the same at $2 \cdot 10^6$.
 
 ### Algorithm
 
 **LPLR: Randomized Low-Precision Low-Rank factorization**
 
-**Input:** Matrix $\mathbf{A} \in \mathbb{R}^{n \times d}$, sketch size $m$, Quantizers $\mathrm{Q}$, $\mathrm{Q}'$ with dynamic ranges $\mathrm{R}_\mathrm{Q}$, $\mathrm{R}_{\mathrm{Q}'}$ and bit-budgets $\mathrm{B}, \mathrm{B}'$ respectively.
+**Input:** Matrix $\mathbf{A} \in \mathbb{R}^{n \times d}$, sketch size $m$, Quantizers $\mathrm{Q}$, $\mathrm{Q}'$ with dynamic ranges $\mathrm{R}\_\mathrm{Q}$, $\mathrm{R}\_{\mathrm{Q}'}$ and bit-budgets $\mathrm{B}, \mathrm{B}'$ respectively.
 
 **Output:** Factorization: $\mathbf{L}\mathbf{R}$ where $\mathbf{L} \in \mathbb{R}^{n \times m}$, $\mathbf{R} \in \mathbb{R}^{m \times d}$
 
 - Sample a Gaussian sketching matrix $\mathbf{S} \in \mathbb{R}^{d \times m}$ with entries $S_{ij} \sim {\cal N}\left(0, \frac{1}{m}\right)$.
 - Compute an approximate basis of column space of $\mathbf{A}$ by forming the sketch: $\mathbf{A}\mathbf{S}$.
 - Quantize the approximate basis with $\mathrm{Q}$ to get $\mathrm{Q}(\mathbf{A}\mathbf{S})$.
-- Find $\mathbf{W}^* = \mathop{\rm arg \hspace{1mm} min}_{\mathbf{W}}\left\lVert{\mathrm{Q}(\mathbf{A}\mathbf{S})\mathbf{W} - \mathbf{A}}\right\rVert_{\rm F}^2$.
-- Quantize $\mathbf{W}^*$ using quantizer $\mathrm{Q}'$ to get $\mathrm{Q}'(\mathbf{W}^*)$.
+- Find $\mathbf{W}^* = {\rm argmin}\_{\mathbf{W}}\left\lVert{\mathrm{Q}(\mathbf{A}\mathbf{S})\mathbf{W} - \mathbf{A}}\right\rVert\_{\rm F}^2$.
+- Quantize $\mathbf{W}^\*$ using quantizer $\mathrm{Q}'$ to get $\mathrm{Q}'(\mathbf{W}^\*)$.
 
 **Return**: Low-rank and low-precision approximation $\mathbf{L}\mathbf{R}$ where $\mathbf{L} = \mathrm{Q}(\mathbf{A}\mathbf{S})$, $\mathbf{R} = \mathrm{Q}'(\mathbf{W}^*)$.
 
