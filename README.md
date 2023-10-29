@@ -19,6 +19,8 @@ The tradeoff between compression ratio and approximation accuracy allows for fle
 <img src="artifacts/images/shepp-logan-rank-166_b1-4_b2-8_b0-2/lplr_svd.png" alt="LSVD (ours)" width="19%">
 </p>
 
+Original Image, Naive Quant, DSVD, LPLR, LSVD (in order)
+
 Compression of Shepp-Logan phantom (a standard test image for medical image reconstruction). Naive quant. was done with $2$-bits per pixel of this $10^3 \times 10^3$ image. Quantizing the SVD factors ``directly" (i.e., DSVD) and (our) LPLR/LSVD algorithms factorize the image into a product of tall \& wide matrices reduces the total number of elements, allowing each entry to be represented using upto $8$-bits of precision per pixel. Despite the increase in precision per pixel, the total number of bits remains the same at $2 \cdot 10^6$.
 
 ### Algorithm
