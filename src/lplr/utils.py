@@ -1,8 +1,9 @@
+import math
 from typing import Tuple
+
 import numpy as np
 import torch
 from loguru import logger
-import math
 
 
 def normalize_and_shift_wrt_inner_prod(X: torch.Tensor = None, Y: torch.Tensor = None):
@@ -18,8 +19,8 @@ def normalize_and_shift_wrt_inner_prod(X: torch.Tensor = None, Y: torch.Tensor =
     d = X.shape[1]
     M = torch.ones_like(X)
 
-    t1 = torch.linalg.norm(Y, ord="fro") ** 2 - torch.sum(torch.multiply(Y, M)) ** 2 / (
-        n * d
+    t1 = torch.linalg.norm(Y, ord="fro") ** 2 - (
+        torch.sum(torch.multiply(Y, M)) ** 2 / (n * d)
     )
     logger.trace(f"t1 = {t1:.5f}")
     t2 = torch.sum(torch.multiply(X, Y)) - torch.sum(torch.multiply(Y, M)) * torch.sum(

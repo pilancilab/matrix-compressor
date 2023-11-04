@@ -1,0 +1,1 @@
+conda env create -n lplr -f environment.yml

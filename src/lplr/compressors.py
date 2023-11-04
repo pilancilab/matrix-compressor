@@ -1,11 +1,14 @@
+import math
+from enum import Enum
+
 import numpy as np
 import torch
-import math
+from codetiming import Timer
+from loguru import logger
+
 from .quantizers import quantize
 from .utils import normalize_and_shift_wrt_inner_prod, sparse_jl_transform
-from loguru import logger
-from enum import Enum
-from codetiming import Timer
+
 
 class Sketch(Enum):
     GAUSSIAN = "Gaussian"
@@ -17,6 +20,7 @@ class Sketch(Enum):
 def uncompressed(X: torch.Tensor = None) -> torch.Tensor:
     """No compressor"""
     return X
+
 
 @Timer(name="lplr")
 def lplr(
@@ -102,9 +106,16 @@ def lplr(
     out = out.type(orig_dtype)
     return out
 
+
 @Timer(name="dsvd")
 def direct_svd_quant(
-    X: torch.Tensor, r: int = None, B1: int = 8, B2: int = 8, f: float = None, eps=1e-5
+    X: torch.Tensor,
+    r: int = None,
+    B1: int = 8,
+    B2: int = 8,
+    f: float = None,
+    eps=1e-5,
+    normalize_and_shift=False,
 ) -> torch.Tensor:
     """
     Compute the full SVD and naively quantize each low rank factor
@@ -119,7 +130,8 @@ def direct_svd_quant(
         raise ValueError("Atleast one of target rank or fraction must be provided.")
 
     # Compute full SVD
-    U, S, VT = torch.linalg.svd(X.float(), full_matrices=False)
+    U, S, VT = np.linalg.svd(X.float().numpy(), full_matrices=False)
+    U, S, VT = map(torch.from_numpy, (U, S, VT))
     if r is None:
         rank = torch.sum(S >= eps)
         r = int(torch.ceil(f * rank).item())
@@ -131,14 +143,15 @@ def direct_svd_quant(
     VT = VT[0:r, :]
 
     # Normalize and quantize the first low-rank factor
-    Z = U @ torch.diag(S)
+    Z = U
     Z = quantize(Z, B=B1)
 
     # Normalize and quantize the second low-rank factor
-    W = VT
+    W = torch.diag(S) @ VT
     W = quantize(W, B=B2)
 
-    # return normalize_and_shift_wrt_inner_prod(X, Z @ W)
+    if normalize_and_shift:
+        return normalize_and_shift_wrt_inner_prod(X, Z @ W)
     return Z @ W
 
 
@@ -163,6 +176,7 @@ def iterative_lplr(
         Xres -= Xq
 
     return normalize_and_shift_wrt_inner_prod(X, X_app)
+
 
 @Timer(name="lsvd")
 def lplr_svd(
