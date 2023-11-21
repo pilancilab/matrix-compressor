@@ -7,10 +7,10 @@ export LOGURU_LEVEL=INFO
 
 
 # Gaussian
-stdbuf -oL python scripts/llama/layer_wise_lplr_quantization.py --model-directory $MODEL_DIRECTORY --output-directory $OUTPUT_DIRECTORY --b1 8 --b2 8 --b_nq 8 --cr 1 --map-location "cuda:1" 2>&1 | stdbuf -oL tee -i $OUTPUT_DIRECTORY/quantization-$(date +%m%d%H%M%S).log
+stdbuf -oL python scripts/llama/per_layer_naive_quantization_comparison/lplr_vanilla.py --model-directory $MODEL_DIRECTORY --output-directory $OUTPUT_DIRECTORY --b1 8 --b2 8 --b_nq 8 --cr 1 --map-location "cuda:1" 2>&1 | stdbuf -oL tee -i $OUTPUT_DIRECTORY/quantization-$(date +%m%d%H%M%S).log
 
 # Sparse JL
-stdbuf -oL python scripts/llama/layer_wise_lplr_quantization.py --model-directory $MODEL_DIRECTORY --output-directory $OUTPUT_DIRECTORY --b1 8 --b2 8 --b_nq 8 --cr 1 --map-location "cuda:2" 2>&1 --sketch SparseJL --sparse-jl-s 1 | stdbuf -oL tee -i $OUTPUT_DIRECTORY/quantization-$(date +%m%d%H%M%S).log
+stdbuf -oL python scripts/llama/per_layer_naive_quantization_comparison/lplr_vanilla.py --model-directory $MODEL_DIRECTORY --output-directory $OUTPUT_DIRECTORY --b1 8 --b2 8 --b_nq 8 --cr 1 --map-location "cuda:2" 2>&1 --sketch SparseJL --sparse-jl-s 1 | stdbuf -oL tee -i $OUTPUT_DIRECTORY/quantization-$(date +%m%d%H%M%S).log
 """
 import json
 import pathlib
@@ -74,15 +74,16 @@ def main(
 
                 col_output_rank = maximum_output_rank(cr, b1, b2, b_nq, col_input.shape)
                 row_output_rank = maximum_output_rank(cr, b1, b2, b_nq, row_input.shape)
-                logger.debug(f"Name: {name} "
+                logger.debug(
+                    f"Name: {name} "
                     f"Shape: {weights.shape} "
                     f"Row Output Rank: {row_output_rank} "
                     f"Col Output Rank: {col_output_rank}"
-                    )
+                )
 
                 if b1 == b2:
                     assert col_output_rank == row_output_rank
-                
+
                 col_sketch = lplr(
                     col_input, col_output_rank, b1, b2, sketch=sketch, **kwargs
                 )
